@@ -17,12 +17,12 @@
                     <p class="timestamp">Last updated: {{ current_time }}</p>
                 </div>
                 <div class="coin-selector">
-                    <button class="coin-btn {% if selected_coin == 'BTC' %}active{% endif %}" data-coin="BTC">
+                    <a href="/?coin=BTC" class="coin-btn {% if selected_coin == 'BTC' %}active{% endif %}">
                         <i class="fab fa-bitcoin"></i> Bitcoin
-                    </button>
-                    <button class="coin-btn {% if selected_coin == 'ETH' %}active{% endif %}" data-coin="ETH">
+                    </a>
+                    <a href="/?coin=ETH" class="coin-btn {% if selected_coin == 'ETH' %}active{% endif %}">
                         <i class="fab fa-ethereum"></i> Ethereum
-                    </button>
+                    </a>
                 </div>
             </div>
         </header>
@@ -62,12 +62,14 @@
                     </div>
 
                     <div class="analysis-container">
-                        <div id="analysis" class="tab-content active glass">
-                            {% if analysis_results[selected_coin] %}
-                                {{ analysis_results[selected_coin]['analysis']|safe }}
-                            {% else %}
-                                <div class="error-message">Analysis unavailable</div>
-                            {% endif %}
+                        <div class="tab-content active glass">
+                            <div class="analysis">
+                                {% if analysis_results[selected_coin] %}
+                                    {{ analysis_results[selected_coin]['analysis']|safe }}
+                                {% else %}
+                                    <div class="error-message">Analysis unavailable</div>
+                                {% endif %}
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -76,15 +78,97 @@
             <div class="news-section glass-card">
                 <h2><i class="fas fa-newspaper"></i> Market Intelligence</h2>
                 <div class="news-categories">
-                    <div class="category" data-category="market">Market Updates</div>
-                    <div class="category" data-category="development">Development News</div>
-                    <div class="category" data-category="regulatory">Regulatory News</div>
+                    {% for category in ['market', 'development', 'regulatory'] %}
+                    <a href="?coin={{ selected_coin }}&category={{ category }}" 
+                       class="category {% if current_category == category %}active{% endif %}">
+                        {% if category == 'market' %}
+                            <i class="fas fa-chart-line"></i> Market Updates
+                        {% elif category == 'development' %}
+                            <i class="fas fa-code"></i> Development News
+                        {% else %}
+                            <i class="fas fa-balance-scale"></i> Regulatory News
+                        {% endif %}
+                    </a>
+                    {% endfor %}
                 </div>
-                <div class="news-grid" id="newsContainer">
-                    <!-- News items will be populated by React -->
+                <div class="news-grid">
+                    {% for article in crypto_news %}
+                    <div class="news-card glass">
+                        <div class="news-content">
+                            <div class="news-sentiment {{ article.sentiment }}">
+                                {% if article.sentiment == 'positive' %}
+                                    <i class="fas fa-arrow-up"></i>
+                                {% elif article.sentiment == 'negative' %}
+                                    <i class="fas fa-arrow-down"></i>
+                                {% else %}
+                                    <i class="fas fa-minus"></i>
+                                {% endif %}
+                            </div>
+                            <h3>{{ article.title }}</h3>
+                            <p>{{ article.snippet }}</p>
+                            <div class="news-meta">
+                                <span><i class="fas fa-clock"></i> {{ article.time }}</span>
+                                <span><i class="fas fa-link"></i> {{ article.source }}</span>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
                 </div>
             </div>
         </main>
     </div>
+
+    <script>
+        // Chart initialization
+        const ctx = document.getElementById('priceChart').getContext('2d');
+        fetch('/api/chart/{{ selected_coin }}')
+            .then(response => response.json())
+            .then(data => {
+                new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: data.labels,
+                        datasets: [{
+                            label: '{{ selected_coin }} Price (USD)',
+                            data: data.prices,
+                            borderColor: '#3b82f6',
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            borderWidth: 2,
+                            tension: 0.4,
+                            fill: true
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                display: false
+                            }
+                        },
+                        scales: {
+                            y: {
+                                ticks: {
+                                    color: 'rgba(255, 255, 255, 0.7)'
+                                },
+                                grid: {
+                                    color: 'rgba(255, 255, 255, 0.1)'
+                                }
+                            },
+                            x: {
+                                ticks: {
+                                    color: 'rgba(255, 255, 255, 0.7)',
+                                    maxRotation: 45,
+                                    minRotation: 45
+                                },
+                                grid: {
+                                    color: 'rgba(255, 255, 255, 0.1)'
+                                }
+                            }
+                        }
+                    }
+                });
+            });
+    </script>
 </body>
 </html>
