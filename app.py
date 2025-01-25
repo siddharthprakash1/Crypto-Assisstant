@@ -1,4 +1,5 @@
 # app.py - Full Code
+
 from flask import Flask, render_template, jsonify, url_for
 import time
 import requests
@@ -13,7 +14,6 @@ from cryptocompare_api import get_latest_price, get_historical_daily_data
 
 app = Flask(__name__)
 
-# Environment setup
 load_dotenv(dotenv_path=os.path.join(os.getcwd(), '.env'))
 print("dotenv loaded. Checking environment variables...")
 
@@ -27,27 +27,42 @@ CRYPTOCARE_API_KEY = os.getenv("CRYPTOCARE_API_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 SERPER_API_KEY = os.getenv("SERPER_API_KEY")
 
+print(f"CRYPTOCARE_API_KEY from env: {CRYPTOCARE_API_KEY}")
+print(f"GEMINI_API_KEY from env: {GEMINI_API_KEY}")
+print(f"SERPER_API_KEY from env: {SERPER_API_KEY}")
+
 genai.configure(api_key=GEMINI_API_KEY)
+
+print("Attempting to initialize GoogleSerperAPIWrapper...")
 serper = GoogleSerperAPIWrapper(serper_api_key=SERPER_API_KEY)
+print("GoogleSerperAPIWrapper initialized successfully.")
 
 def get_latest_price(symbols, currency='USD'):
+    print("Entering get_latest_price function")
     url = f"https://min-api.cryptocompare.com/data/pricemultifull?fsyms={','.join(symbols)}&tsyms={currency}&api_key={CRYPTOCARE_API_KEY}"
+    print(f"API Request URL: {url}")
     try:
         response = requests.get(url)
         response.raise_for_status()
         data = response.json()
+        print("API Response Data:", data)
         return data.get('RAW', {})
     except requests.exceptions.RequestException as e:
         print(f"Error fetching data from CryptoCompare API: {e}")
         return {}
 
 def analyze_price_with_gemini(crypto_symbol, price, serper_search):
+    print("Entering analyze_price_with_gemini function")
+    print(f"Analyzing symbol: {crypto_symbol}, price: {price}")
+
     try:
+        print("Initializing Gemini LLM using ChatGoogleGenerativeAI...")
         llm = ChatGoogleGenerativeAI(
             model="gemini-pro",
             google_api_key=GEMINI_API_KEY,
             temperature=0.7
         )
+        print("Gemini LLM initialized successfully.")
 
         analysis_template = """You are a cryptocurrency analyst providing concise insights and investment guidance on current crypto prices, incorporating sentiment from recent news.
 
@@ -66,13 +81,22 @@ def analyze_price_with_gemini(crypto_symbol, price, serper_search):
         Format your response as a short paragraph for the analysis, then "News and Sentiment:" followed by the news snippets, and finally list the investment recommendations (amount, stop-loss, timeframe, plan) as bullet points."""
 
         analysis_prompt = ChatPromptTemplate.from_template(analysis_template)
-        analysis_chain = LLMChain(llm=llm, prompt=analysis_prompt)
+        print("Analysis prompt created.")
 
+        analysis_chain = LLMChain(llm=llm, prompt=analysis_prompt)
+        print("Analysis LLMChain initialized.")
+
+        print("Performing web search for sentiment...")
         search_query = f"recent news sentiment {crypto_symbol}"
         sentiment_news = serper_search.run(search_query)
+        print("Web search for sentiment completed.")
+        print("Sentiment News Snippets:\n", sentiment_news[:500] + "...")
 
+        print("Invoking analysis chain...")
         analysis_output = analysis_chain.invoke({"crypto_symbol": crypto_symbol, "price": price, "sentiment_news": sentiment_news})
         analysis_text = analysis_output['text']
+        print("Analysis chain invoked.")
+        print("Gemini Analysis Result:\n", analysis_text)
 
         analysis_paragraph = ""
         recommendations_text = ""
@@ -81,7 +105,6 @@ def analyze_price_with_gemini(crypto_symbol, price, serper_search):
         parts = analysis_text.split("News and Sentiment:")
         if len(parts) > 1:
             analysis_paragraph = parts[0].strip()
-            analysis_paragraph = analysis_paragraph.replace('**', '<strong>')
             news_and_recommendation_parts = parts[1].strip().split("Investment Recommendations:")
             if len(news_and_recommendation_parts) > 1:
                 news_and_sentiment_text = news_and_recommendation_parts[0].strip()
@@ -91,11 +114,7 @@ def analyze_price_with_gemini(crypto_symbol, price, serper_search):
         else:
             analysis_paragraph = parts[0].strip()
 
-        return {
-            "analysis": analysis_paragraph, 
-            "recommendations": recommendations_text, 
-            "sentiment_news": news_and_sentiment_text
-        }
+        return {"analysis": analysis_paragraph, "recommendations": recommendations_text, "sentiment_news": news_and_sentiment_text}
 
     except Exception as e:
         error_message = f"Error during analysis with Gemini: {e}"
@@ -103,6 +122,7 @@ def analyze_price_with_gemini(crypto_symbol, price, serper_search):
         return error_message
 
 def get_crypto_news(serper):
+    """Fetch general cryptocurrency news using Serper API"""
     try:
         search_query = "cryptocurrency market news latest developments past 24 hours"
         results = serper.run(search_query)
@@ -125,6 +145,8 @@ def get_crypto_news(serper):
 @app.route("/chart-data/<symbol>")
 def chart_data(symbol):
     historical_data = get_historical_daily_data(symbol)
+    print(f"Historical Data for {symbol}: {historical_data}")
+
     if historical_data:
         labels = [time.strftime('%Y-%m-%d', time.localtime(item['time'])) for item in historical_data]
         prices = [item['close'] for item in historical_data]
@@ -141,6 +163,7 @@ def chart_data(symbol):
                 'fill': 'origin' 
             }]
         }
+        print(f"Chart Data for {symbol}: {chart_data_response}")
         return jsonify(chart_data_response)
     else:
         return jsonify({'error': 'Failed to fetch historical data'}), 500
