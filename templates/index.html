@@ -3,39 +3,25 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Crypto Assistant Pro</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <title>Crypto Insights</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
 <body>
-    <nav class="sidebar">
-        <div class="brand">
-            <i class="fas fa-cubes"></i>
-            <span>CryptoAssist</span>
-        </div>
-        <ul class="nav-links">
-            <li class="active"><i class="fas fa-chart-line"></i> Dashboard</li>
-            <li><i class="fas fa-newspaper"></i> News</li>
-            <li><i class="fas fa-bell"></i> Alerts</li>
-            <li><i class="fas fa-cog"></i> Settings</li>
-        </ul>
-    </nav>
-
     <div class="main-content">
         <header>
             <div class="header-content">
                 <div class="market-overview">
-                    <h2>Market Overview</h2>
+                    <h1>Crypto Insights</h1>
                     <p class="timestamp">Last updated: {{ current_time }}</p>
                 </div>
-                <div class="header-controls">
-                    <div class="search-bar">
-                        <i class="fas fa-search"></i>
-                        <input type="text" placeholder="Search cryptocurrencies...">
-                    </div>
-                    <button class="refresh-btn">
-                        <i class="fas fa-sync-alt"></i>
+                <div class="coin-selector">
+                    <button class="coin-btn {% if selected_coin == 'BTC' %}active{% endif %}" data-coin="BTC">
+                        <i class="fab fa-bitcoin"></i> Bitcoin
+                    </button>
+                    <button class="coin-btn {% if selected_coin == 'ETH' %}active{% endif %}" data-coin="ETH">
+                        <i class="fab fa-ethereum"></i> Ethereum
                     </button>
                 </div>
             </div>
@@ -43,27 +29,26 @@
 
         <main>
             <div class="crypto-grid">
-                {% for symbol in prices %}
                 <div class="crypto-card glass-card">
                     <div class="crypto-header">
                         <div class="crypto-title">
-                            <i class="crypto-icon fab fa-{{ symbol.lower() }}"></i>
+                            <i class="crypto-icon fab fa-{{ selected_coin.lower() }}"></i>
                             <div>
-                                <h2>{{ symbol }}</h2>
+                                <h2>{{ selected_coin }}</h2>
                                 <span class="currency">USD</span>
                             </div>
                         </div>
                         <div class="price-info">
-                            {% if prices[symbol]['USD'] %}
-                            <div class="current-price">${{ "%.2f"|format(prices[symbol]['USD']) }}</div>
+                            {% if prices[selected_coin]['USD'] %}
+                            <div class="current-price">${{ "%.2f"|format(prices[selected_coin]['USD']) }}</div>
                             <div class="day-stats">
                                 <div class="stat">
                                     <span class="label">24h High</span>
-                                    <span class="value high">${{ "%.2f"|format(prices[symbol]['HIGH24HOUR']) }}</span>
+                                    <span class="value high">${{ "%.2f"|format(prices[selected_coin]['HIGH24HOUR']) }}</span>
                                 </div>
                                 <div class="stat">
                                     <span class="label">24h Low</span>
-                                    <span class="value low">${{ "%.2f"|format(prices[symbol]['LOW24HOUR']) }}</span>
+                                    <span class="value low">${{ "%.2f"|format(prices[selected_coin]['LOW24HOUR']) }}</span>
                                 </div>
                             </div>
                             {% else %}
@@ -73,116 +58,33 @@
                     </div>
 
                     <div class="chart-container glass">
-                        <canvas id="chart-{{ symbol }}"></canvas>
+                        <canvas id="priceChart"></canvas>
                     </div>
 
                     <div class="analysis-container">
-                        <div class="tab-container">
-                            <button class="tab active" onclick="showTab(this, 'analysis-{{ symbol }}')">Analysis</button>
-                            <button class="tab" onclick="showTab(this, 'sentiment-{{ symbol }}')">Sentiment</button>
-                            <button class="tab" onclick="showTab(this, 'recommendations-{{ symbol }}')">Strategy</button>
+                        <div id="analysis" class="tab-content active glass">
+                            {% if analysis_results[selected_coin] %}
+                                {{ analysis_results[selected_coin]['analysis']|safe }}
+                            {% else %}
+                                <div class="error-message">Analysis unavailable</div>
+                            {% endif %}
                         </div>
-
-                        {% if analysis_results[symbol] is mapping %}
-                            <div id="analysis-{{ symbol }}" class="tab-content active glass">
-                                <p class="analysis">{{ analysis_results[symbol]['analysis']|safe }}</p>
-                            </div>
-                            
-                            <div id="sentiment-{{ symbol }}" class="tab-content glass">
-                                {{ analysis_results[symbol]['sentiment_news'] }}
-                            </div>
-
-                            <div id="recommendations-{{ symbol }}" class="tab-content glass">
-                                {{ analysis_results[symbol]['recommendations'] }}
-                            </div>
-                        {% else %}
-                            <div class="error-message glass">
-                                <i class="fas fa-exclamation-circle"></i>
-                                <p>{{ analysis_results[symbol] }}</p>
-                            </div>
-                        {% endif %}
                     </div>
                 </div>
-                {% endfor %}
             </div>
 
             <div class="news-section glass-card">
-                <h2><i class="fas fa-newspaper"></i> Crypto Market News</h2>
-                <div class="news-grid">
-                    {% for article in crypto_news %}
-                    <div class="news-card glass">
-                        <div class="news-content">
-                            <h3>{{ article.title }}</h3>
-                            <p>{{ article.snippet }}</p>
-                            <div class="news-meta">
-                                <span><i class="fas fa-clock"></i> {{ article.time }}</span>
-                                <span><i class="fas fa-link"></i> {{ article.source }}</span>
-                            </div>
-                        </div>
-                    </div>
-                    {% endfor %}
+                <h2><i class="fas fa-newspaper"></i> Market Intelligence</h2>
+                <div class="news-categories">
+                    <div class="category" data-category="market">Market Updates</div>
+                    <div class="category" data-category="development">Development News</div>
+                    <div class="category" data-category="regulatory">Regulatory News</div>
+                </div>
+                <div class="news-grid" id="newsContainer">
+                    <!-- News items will be populated by React -->
                 </div>
             </div>
         </main>
     </div>
-
-    <script>
-        function showTab(button, contentId) {
-            // Remove active class from all tabs and contents
-            const tabContainer = button.parentElement;
-            const container = tabContainer.parentElement;
-            
-            tabContainer.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
-            container.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
-            
-            // Add active class to clicked tab and corresponding content
-            button.classList.add('active');
-            document.getElementById(contentId).classList.add('active');
-        }
-
-        // Initialize charts
-        {% for symbol in chart_urls %}
-            {% if chart_urls[symbol] %}
-                fetch('{{ chart_urls[symbol] }}')
-                    .then(response => response.json())
-                    .then(data => {
-                        const ctx = document.getElementById('chart-{{ symbol }}').getContext('2d');
-                        new Chart(ctx, {
-                            type: 'line',
-                            data: data,
-                            options: {
-                                responsive: true,
-                                maintainAspectRatio: false,
-                                plugins: {
-                                    legend: {
-                                        display: false
-                                    }
-                                },
-                                scales: {
-                                    y: {
-                                        ticks: {
-                                            color: 'rgba(255, 255, 255, 0.7)'
-                                        },
-                                        grid: {
-                                            color: 'rgba(255, 255, 255, 0.1)'
-                                        }
-                                    },
-                                    x: {
-                                        ticks: {
-                                            color: 'rgba(255, 255, 255, 0.7)',
-                                            maxRotation: 45,
-                                            minRotation: 45
-                                        },
-                                        grid: {
-                                            color: 'rgba(255, 255, 255, 0.1)'
-                                        }
-                                    }
-                                }
-                            }
-                        });
-                    });
-            {% endif %}
-        {% endfor %}
-    </script>
 </body>
 </html>
