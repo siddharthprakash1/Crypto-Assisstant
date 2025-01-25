@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Crypto Insights</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
@@ -39,8 +40,12 @@
                             </div>
                         </div>
                         <div class="price-info">
-                            {% if prices[selected_coin]['USD'] %}
-                            <div class="current-price">${{ "%.2f"|format(prices[selected_coin]['USD']) }}</div>
+                            {% if prices[selected_coin]['PRICE'] %}
+                            <div class="current-price">${{ "%.2f"|format(prices[selected_coin]['PRICE']) }}</div>
+                            <div class="price-change {% if prices[selected_coin]['CHANGEPCT24HOUR']|default(0) > 0 %}positive{% else %}negative{% endif %}">
+                                <i class="fas fa-{% if prices[selected_coin]['CHANGEPCT24HOUR']|default(0) > 0 %}arrow-up{% else %}arrow-down{% endif %}"></i>
+                                {{ "%.2f"|format(prices[selected_coin]['CHANGEPCT24HOUR']|default(0)) }}%
+                            </div>
                             <div class="day-stats">
                                 <div class="stat">
                                     <span class="label">24h High</span>
@@ -57,18 +62,85 @@
                         </div>
                     </div>
 
+                    <div class="price-metrics">
+                        <div class="metric-card">
+                            <div class="metric-label">Market Cap</div>
+                            <div class="metric-value">${{ '{:,.0f}'.format(prices[selected_coin]['MKTCAP']|default(0)) }}</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-label">24h Volume</div>
+                            <div class="metric-value">${{ '{:,.0f}'.format(prices[selected_coin]['VOLUME24HOUR']|default(0)) }}</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-label">24h Change</div>
+                            <div class="metric-change {% if prices[selected_coin]['CHANGEPCT24HOUR']|default(0) > 0 %}positive{% else %}negative{% endif %}">
+                                {{ '%.2f'|format(prices[selected_coin]['CHANGEPCT24HOUR']|default(0)) }}%
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="chart-container glass">
+                        <div id="chartLoading" class="loading-overlay">
+                            <div class="loading-spinner"></div>
+                        </div>
                         <canvas id="priceChart"></canvas>
                     </div>
 
                     <div class="analysis-container">
-                        <div class="tab-content active glass">
-                            <div class="analysis">
-                                {% if analysis_results[selected_coin] %}
-                                    {{ analysis_results[selected_coin]['analysis']|safe }}
-                                {% else %}
-                                    <div class="error-message">Analysis unavailable</div>
-                                {% endif %}
+                        <div class="analysis-header">
+                            <div class="price-snapshot">
+                                <div class="price-metric">
+                                    <div class="label">Current Price</div>
+                                    <div class="value">${{ "%.2f"|format(prices[selected_coin]['PRICE']) }}</div>
+                                </div>
+                                <div class="price-metric">
+                                    <div class="label">24h High</div>
+                                    <div class="value high">${{ "%.2f"|format(prices[selected_coin]['HIGH24HOUR']) }}</div>
+                                </div>
+                                <div class="price-metric">
+                                    <div class="label">24h Low</div>
+                                    <div class="value low">${{ "%.2f"|format(prices[selected_coin]['LOW24HOUR']) }}</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="analysis-content">
+                            <div class="insight-box">
+                                <h4>
+                                    <i class="fas fa-chart-line"></i>
+                                    Market Analysis
+                                </h4>
+                                <ul class="insight-list">
+                                    {% for point in analysis_results[selected_coin]['market_points'] %}
+                                    <li>
+                                        <i class="fas fa-circle"></i>
+                                        {{ point }}
+                                    </li>
+                                    {% endfor %}
+                                </ul>
+                            </div>
+                            <div class="insight-box">
+                                <h4>
+                                    <i class="fas fa-binoculars"></i>
+                                    Short-Term Outlook
+                                </h4>
+                                <ul class="insight-list">
+                                    {% for point in analysis_results[selected_coin]['outlook_points'] %}
+                                    <li>
+                                        <i class="fas fa-circle"></i>
+                                        {{ point }}
+                                    </li>
+                                    {% endfor %}
+                                </ul>
+                                <div class="levels-grid">
+                                    <div class="level-box resistance">
+                                        <div class="label">Key Resistance</div>
+                                        <div class="value">${{ "%.2f"|format(analysis_results[selected_coin]['resistance']) }}</div>
+                                    </div>
+                                    <div class="level-box support">
+                                        <div class="label">Key Support</div>
+                                        <div class="value">${{ "%.2f"|format(analysis_results[selected_coin]['support']) }}</div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -119,40 +191,123 @@
     </div>
 
     <script>
-        // Chart initialization
         const ctx = document.getElementById('priceChart').getContext('2d');
-        fetch('/api/chart/{{ selected_coin }}')
-            .then(response => response.json())
-            .then(data => {
-                new Chart(ctx, {
+        const loadingSpinner = document.getElementById('chartLoading');
+
+        async function initializeChart() {
+            try {
+                const response = await fetch('/api/chart/{{ selected_coin }}');
+                const data = await response.json();
+                
+                loadingSpinner.style.display = 'none';
+                
+                const chart = new Chart(ctx, {
                     type: 'line',
                     data: {
                         labels: data.labels,
-                        datasets: [{
-                            label: '{{ selected_coin }} Price (USD)',
-                            data: data.prices,
-                            borderColor: '#3b82f6',
-                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                            borderWidth: 2,
-                            tension: 0.4,
-                            fill: true
-                        }]
+                        datasets: [
+                            {
+                                label: '{{ selected_coin }} Price (USD)',
+                                data: data.prices,
+                                borderColor: '#3b82f6',
+                                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                                borderWidth: 2,
+                                tension: 0.4,
+                                fill: true,
+                                yAxisID: 'y'
+                            },
+                            {
+                                label: 'Volume',
+                                data: data.volumes,
+                                type: 'bar',
+                                backgroundColor: 'rgba(59, 130, 246, 0.3)',
+                                yAxisID: 'y1'
+                            }
+                        ]
                     },
                     options: {
                         responsive: true,
                         maintainAspectRatio: false,
+                        interaction: {
+                            intersect: false,
+                            mode: 'index'
+                        },
                         plugins: {
                             legend: {
-                                display: false
+                                display: true,
+                                position: 'top',
+                                labels: {
+                                    color: 'rgba(255, 255, 255, 0.7)'
+                                }
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        let label = context.dataset.label || '';
+                                        if (label) {
+                                            label += ': ';
+                                        }
+                                        if (context.datasetIndex === 0) {
+                                            label += new Intl.NumberFormat('en-US', { 
+                                                style: 'currency', 
+                                                currency: 'USD' 
+                                            }).format(context.raw);
+                                        } else {
+                                            label += new Intl.NumberFormat('en-US').format(context.raw);
+                                        }
+                                        return label;
+                                    }
+                                }
+                            },
+                            annotation: {
+                                annotations: {
+                                    support: {
+                                        type: 'line',
+                                        yMin: data.support,
+                                        yMax: data.support,
+                                        borderColor: '#10b981',
+                                        borderWidth: 1,
+                                        borderDash: [5, 5],
+                                        label: {
+                                            content: 'Support',
+                                            enabled: true
+                                        }
+                                    },
+                                    resistance: {
+                                        type: 'line',
+                                        yMin: data.resistance,
+                                        yMax: data.resistance,
+                                        borderColor: '#ef4444',
+                                        borderWidth: 1,
+                                        borderDash: [5, 5],
+                                        label: {
+                                            content: 'Resistance',
+                                            enabled: true
+                                        }
+                                    }
+                                }
                             }
                         },
                         scales: {
                             y: {
+                                position: 'left',
                                 ticks: {
-                                    color: 'rgba(255, 255, 255, 0.7)'
+                                    color: 'rgba(255, 255, 255, 0.7)',
+                                    callback: function(value) {
+                                        return '$' + value.toLocaleString();
+                                    }
                                 },
                                 grid: {
                                     color: 'rgba(255, 255, 255, 0.1)'
+                                }
+                            },
+                            y1: {
+                                position: 'right',
+                                grid: {
+                                    display: false
+                                },
+                                ticks: {
+                                    color: 'rgba(255, 255, 255, 0.7)'
                                 }
                             },
                             x: {
@@ -168,7 +323,13 @@
                         }
                     }
                 });
-            });
+            } catch (error) {
+                console.error('Error loading chart:', error);
+                loadingSpinner.innerHTML = '<div>Error loading chart data</div>';
+            }
+        }
+
+        initializeChart();
     </script>
 </body>
 </html>

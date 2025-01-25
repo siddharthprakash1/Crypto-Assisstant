@@ -1,5 +1,6 @@
 from flask import Flask, render_template, jsonify, request
 import time
+import json
 from datetime import datetime
 import requests
 import os
@@ -24,24 +25,19 @@ SERPER_API_KEY = os.getenv("SERPER_API_KEY")
 genai.configure(api_key=GEMINI_API_KEY)
 serper = GoogleSerperAPIWrapper(serper_api_key=SERPER_API_KEY)
 
-# Cache for 5 minutes
 @lru_cache(maxsize=128)
 def get_cached_price(symbol, timestamp):
-    """Cached version of price data, refreshed every 5 minutes"""
     return get_crypto_price(symbol)
 
 @lru_cache(maxsize=128)
 def get_cached_historical(symbol, timestamp):
-    """Cached version of historical data, refreshed every 5 minutes"""
     return get_historical_data(symbol)
 
 @lru_cache(maxsize=128)
 def get_cached_news(symbol, category, timestamp):
-    """Cached version of news data, refreshed every 5 minutes"""
     return get_crypto_news(symbol, category)
 
 def get_crypto_price(symbol):
-    """Fetch current price data for a cryptocurrency"""
     url = f"https://min-api.cryptocompare.com/data/pricemultifull?fsyms={symbol}&tsyms=USD&api_key={CRYPTOCARE_API_KEY}"
     try:
         response = requests.get(url)
@@ -53,7 +49,6 @@ def get_crypto_price(symbol):
         return {}
 
 def get_historical_data(symbol, limit=30):
-    """Fetch historical price data"""
     url = f"https://min-api.cryptocompare.com/data/v2/histoday?fsym={symbol}&tsym=USD&limit={limit}&api_key={CRYPTOCARE_API_KEY}"
     try:
         response = requests.get(url)
@@ -64,8 +59,8 @@ def get_historical_data(symbol, limit=30):
         print(f"Error fetching historical data: {e}")
         return []
 
+
 def analyze_with_gemini(symbol, price_data, max_retries=3):
-    """Analyze crypto data using Gemini Pro with retry logic"""
     for attempt in range(max_retries):
         try:
             llm = ChatGoogleGenerativeAI(
@@ -74,37 +69,80 @@ def analyze_with_gemini(symbol, price_data, max_retries=3):
                 temperature=0.7
             )
 
-            template = """You are a cryptocurrency analyst. Analyze the following data for {symbol}:
+            template = """You are an expert cryptocurrency analyst. Analyze the following data for {symbol}:
             Current Price: ${price}
             24h High: ${high}
             24h Low: ${low}
-            
-            Provide a brief, professional analysis of the price action and potential short-term outlook.
-            Include key support/resistance levels if relevant. Keep it concise and actionable.
-            Format your response with clear bullet points highlighting key insights."""
+
+            Return a detailed analysis in this exact JSON format:
+            {{
+                "market_points": [
+                    "Detailed price trend: {symbol} has moved [up/down] by X% in the last 24h, currently at ${price}. This movement indicates...",
+                    "Volume analysis: Trading volume shows [increasing/decreasing] momentum, suggesting...",
+                    "Technical indicators: RSI/MACD/Moving Averages are showing [bullish/bearish] signals because..."
+                ],
+                "outlook_points": [
+                    "Price target: Expect movement towards $X in the short term based on...",
+                    "Key levels: Major resistance at [price levels] and support at [price levels] based on recent trading patterns",
+                    "Trading strategy: Consider [specific action] at current levels because..."
+                ],
+                "support": {low},
+                "resistance": {high}
+            }}
+
+            Make each point specific, data-driven, and actionable. Include actual price levels and percentages."""
 
             prompt = ChatPromptTemplate.from_template(template)
             chain = LLMChain(llm=llm, prompt=prompt)
 
             analysis = chain.invoke({
                 "symbol": symbol,
-                "price": price_data.get('PRICE', 0),
+                "price": "{:,.2f}".format(price_data.get('PRICE', 0)),
                 "high": price_data.get('HIGH24HOUR', 0),
                 "low": price_data.get('LOW24HOUR', 0)
             })
 
-            return analysis.get('text', '')
+            try:
+                response_text = analysis.get('text', '').strip()
+                if not response_text.startswith('{'): 
+                    response_text = response_text[response_text.find('{'):]
+                if not response_text.endswith('}'): 
+                    response_text = response_text[:response_text.rfind('}')+1]
+                    
+                return json.loads(response_text)
+            except json.JSONDecodeError as e:
+                print(f"JSON parsing error: {e}")
+                return generate_fallback_analysis(symbol, price_data)
+
         except Exception as e:
             if "429" in str(e) and attempt < max_retries - 1:
-                sleep_time = (attempt + 1) * 2  # Progressive backoff
+                sleep_time = (attempt + 1) * 2
                 print(f"Rate limit hit, retrying in {sleep_time} seconds...")
                 sleep(sleep_time)
-            else:
-                print(f"Analysis error: {e}")
-                return "Analysis temporarily unavailable. Please try again in a few minutes."
+                continue
+            print(f"Analysis error: {e}")
+            return generate_fallback_analysis(symbol, price_data)
+
+def generate_fallback_analysis(symbol, price_data):
+    """Generate fallback analysis when main analysis fails"""
+    return {
+        "market_points": [
+            f"{symbol} is currently trading at ${price_data.get('PRICE', 0):,.2f}",
+            "Analysis temporarily unavailable",
+            "Please refresh for updated analysis"
+        ],
+        "outlook_points": [
+            "Short-term outlook pending",
+            "Support and resistance levels being calculated",
+            "Try again in a few moments"
+        ],
+        "support": price_data.get('LOW24HOUR', 0),
+        "resistance": price_data.get('HIGH24HOUR', 0)
+    }
+
+
 
 def get_crypto_news(symbol, category='market', max_retries=3):
-    """Fetch and analyze news with sentiment and retry logic"""
     for attempt in range(max_retries):
         try:
             queries = {
@@ -114,7 +152,6 @@ def get_crypto_news(symbol, category='market', max_retries=3):
             }
             
             search_results = serper.run(queries.get(category, queries['market']))
-            
             llm = ChatGoogleGenerativeAI(
                 model="gemini-pro",
                 google_api_key=GEMINI_API_KEY,
@@ -134,11 +171,10 @@ def get_crypto_news(symbol, category='market', max_retries=3):
                 source = source_parts[0] if len(source_parts) > 1 else 'News Source'
                 
                 try:
-                    sentiment_prompt = f"Analyze the sentiment of this crypto news headline and snippet: '{title} - {snippet}'. Respond with ONLY one word: positive, negative, or neutral"
+                    sentiment_prompt = f"Analyze the sentiment of this crypto news headline: '{title}'. Respond with ONLY one word: positive, negative, or neutral"
                     sentiment = llm.predict(sentiment_prompt).lower().strip()
-                except Exception as e:
-                    print(f"Sentiment analysis error: {e}")
-                    sentiment = "neutral"  # Default to neutral if sentiment analysis fails
+                except Exception:
+                    sentiment = "neutral"
                     
                 news_items.append({
                     'title': title,
@@ -154,14 +190,13 @@ def get_crypto_news(symbol, category='market', max_retries=3):
                 sleep_time = (attempt + 1) * 2
                 print(f"Rate limit hit, retrying in {sleep_time} seconds...")
                 sleep(sleep_time)
-            else:
-                print(f"News fetching error: {e}")
-                return []
+                continue
+            print(f"News fetching error: {e}")
+            return []
 
 @app.route('/api/chart/<symbol>')
 def get_chart_data(symbol):
-    """API endpoint for chart data"""
-    current_timestamp = int(time.time()) // 300 * 300  # Round to nearest 5 minutes
+    current_timestamp = int(time.time()) // 300 * 300
     historical_data = get_cached_historical(symbol, current_timestamp)
     
     if historical_data:
@@ -175,20 +210,21 @@ def get_chart_data(symbol):
 
 @app.route('/')
 def index():
-    """Main page route"""
     selected_coin = request.args.get('coin', 'BTC')
     current_category = request.args.get('category', 'market')
     
-    # Get current timestamp rounded to 5 minutes for caching
     current_timestamp = int(time.time()) // 300 * 300
-    
-    # Get cached data
     price_data = get_cached_price(selected_coin, current_timestamp)
     
     if price_data:
         analysis = analyze_with_gemini(selected_coin, price_data)
     else:
-        analysis = "Price data unavailable"
+        analysis = {
+            "market_points": ["Price data unavailable"],
+            "outlook_points": ["Analysis unavailable"],
+            "support": 0,
+            "resistance": 0
+        }
     
     crypto_news = get_cached_news(selected_coin, current_category, current_timestamp)
 
@@ -196,7 +232,7 @@ def index():
                          selected_coin=selected_coin,
                          current_category=current_category,
                          prices={selected_coin: price_data},
-                         analysis_results={selected_coin: {'analysis': analysis}},
+                         analysis_results={selected_coin: analysis},
                          crypto_news=crypto_news,
                          current_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC"))
 
